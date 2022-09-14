@@ -1,4 +1,6 @@
-﻿namespace EasyCaching.LiteDB
+﻿using System.Linq.Expressions;
+
+namespace EasyCaching.LiteDB
 {
     using EasyCaching.Core;
     using global::LiteDB;
@@ -250,21 +252,21 @@
             var searchPattern = this.ProcessSearchKeyPattern(pattern);
             var searchKey = this.HandleSearchKeyPattern(pattern);
 
-            _cache.DeleteMany(c => Predicate(c.cachekey, searchKey, searchPattern));
+            _cache.DeleteMany(Predicate(searchKey, searchPattern));
         }
-        
-        private bool Predicate(string key, string searchKey, SearchKeyPattern searchKeyPattern)
+
+        private static Expression<Func<CacheItem, bool>> Predicate(string searchKey, SearchKeyPattern searchKeyPattern)
         {
             switch (searchKeyPattern)
             {
                 case SearchKeyPattern.Postfix:
-                    return key.EndsWith(searchKey, StringComparison.Ordinal);
+                    return item => item.cachekey.EndsWith(searchKey, StringComparison.Ordinal);
                 case SearchKeyPattern.Prefix:
-                    return key.StartsWith(searchKey, StringComparison.Ordinal);
+                    return item => item.cachekey.StartsWith(searchKey, StringComparison.Ordinal);
                 case SearchKeyPattern.Contains:
-                    return key.Contains(searchKey);
+                    return item => item.cachekey.Contains(searchKey);
                 case SearchKeyPattern.Exact:
-                    return key.Equals(searchKey, StringComparison.Ordinal);
+                    return item => item.cachekey.Equals(searchKey, StringComparison.Ordinal);
                 default:
                     throw new ArgumentOutOfRangeException(nameof(searchKeyPattern), searchKeyPattern, null);
             }
