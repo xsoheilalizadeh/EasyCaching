@@ -275,6 +275,22 @@
 
             return prefix;
         }
+        
+        /// <summary>
+        /// Handles the pattern of CacheKey.
+        /// </summary>
+        /// <param name="pattern">Pattern of CacheKey.</param>
+        private string HandleKeyPattern(string pattern)
+        {
+            // Forbid
+            if (pattern.Equals("*"))
+                throw new ArgumentException("the pattern should not equal to *");
+
+            if (!string.IsNullOrWhiteSpace(_cache.Nodes?.Values?.FirstOrDefault()?.Prefix))
+                pattern = _cache.Nodes?.Values?.FirstOrDefault()?.Prefix + pattern;
+
+            return pattern;
+        }
 
         /// <summary>
         /// Searchs the redis keys.
@@ -405,6 +421,8 @@
         {
             ArgumentCheck.NotNullOrWhiteSpace(pattern, nameof(pattern));
 
+            pattern = this.HandleKeyPattern(pattern);
+
             if (_options.EnableLogging)
                 _logger?.LogInformation($"BaseRemoveByPattern : pattern = {pattern}");
 
@@ -415,6 +433,8 @@
                 _cache.Del(item);
             }
         }
+        
+     
 
         /// <summary>
         /// Set the specified cacheKey, cacheValue and expiration.

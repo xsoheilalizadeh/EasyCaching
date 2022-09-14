@@ -293,6 +293,8 @@ namespace EasyCaching.Redis
         {
             ArgumentCheck.NotNullOrWhiteSpace(pattern, nameof(pattern));
 
+            pattern = this.HandleKeyPattern(pattern);
+
             if (_options.EnableLogging)
                 _logger?.LogInformation($"RemoveByPattern : pattern = {pattern}");
 
@@ -370,6 +372,22 @@ namespace EasyCaching.Redis
                 prefix = _options.DBConfig.KeyPrefix + prefix;
 
             return prefix;
+        }
+        
+        /// <summary>
+        /// Handles the pattern of CacheKey.
+        /// </summary>
+        /// <param name="pattern">Pattern of CacheKey.</param>
+        private string HandleKeyPattern(string pattern)
+        {
+            // Forbid
+            if (pattern.Equals("*"))
+                throw new ArgumentException("the pattern should not equal to *");
+
+            if (!string.IsNullOrWhiteSpace(_options.DBConfig.KeyPrefix))
+                pattern = _options.DBConfig.KeyPrefix + pattern;
+
+            return pattern;
         }
         
         /// <summary>
