@@ -218,6 +218,11 @@
                 new TimeSpan(0, 0, 0));
         }
 
+        public override Task BaseRemoveByPatternAsync(string pattern, CancellationToken cancellationToken = default)
+        {
+            throw new NotImplementedException();
+        }
+
         /// <summary>
         /// Sets all async.
         /// </summary>

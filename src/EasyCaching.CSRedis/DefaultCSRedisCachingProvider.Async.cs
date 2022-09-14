@@ -299,6 +299,25 @@
             await Task.WhenAll(tasks);
         }
 
+        public override async Task BaseRemoveByPatternAsync(string pattern, CancellationToken cancellationToken = default)
+        {
+            ArgumentCheck.NotNullOrWhiteSpace(pattern, nameof(pattern));
+
+            if (_options.EnableLogging)
+                _logger?.LogInformation($"BaseRemoveByPatternAsync : pattern = {pattern}");
+
+            var redisKeys = this.SearchRedisKeys(pattern);
+
+            var tasks = new List<Task<long>>();
+
+            foreach (var item in redisKeys)
+            {
+                tasks.Add(_cache.DelAsync(item));
+            }
+
+            await Task.WhenAll(tasks);
+        }
+
         /// <summary>
         /// Sets all async.
         /// </summary>

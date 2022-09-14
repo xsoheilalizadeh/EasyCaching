@@ -1,4 +1,6 @@
-﻿namespace EasyCaching.Disk
+﻿using System.Threading.Tasks;
+
+namespace EasyCaching.Disk
 {
     using EasyCaching.Core;
     using EasyCaching.Core.DistributedLock;
@@ -458,6 +460,26 @@
 
             var list = _cacheKeysMap.Where(x => x.Key.StartsWith(prefix, StringComparison.Ordinal)).Select(x => x.Key).ToList();
 
+            foreach (var item in list)
+            {
+                var path = BuildMd5Path(item);
+
+                if (DeleteFileWithRetry(path))
+                {
+                    _cacheKeysMap.TryRemove(item, out _);
+                }
+            }
+        }
+
+        public override void BaseRemoveByPattern(string pattern)
+        {
+            ArgumentCheck.NotNullOrWhiteSpace(pattern, nameof(pattern));
+
+            var searchPattern = this.ProcessSearchKeyPattern(pattern);
+            var searchKey = this.HandleSearchKeyPattern(pattern);
+
+            var list = _cacheKeysMap.Where(pair => Predicate(pair.Key,searchKey, searchPattern)).Select(x => x.Key).ToList();
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   
             foreach (var item in list)
             {
                 var path = BuildMd5Path(item);

@@ -129,6 +129,16 @@
             await Task.Run(() => BaseRemoveByPrefix(prefix), cancellationToken);
         }
 
+        public override async Task BaseRemoveByPatternAsync(string pattern, CancellationToken cancellationToken = default)
+        {
+            ArgumentCheck.NotNullOrWhiteSpace(pattern, nameof(pattern));
+
+            if (_options.EnableLogging)
+                _logger?.LogInformation($"RemoveByPatternAsync : pattern = {pattern}");
+
+            await Task.Run(() => BaseRemoveByPattern(pattern), cancellationToken);
+        }
+
         /// <summary>
         /// Sets all async.
         /// </summary>

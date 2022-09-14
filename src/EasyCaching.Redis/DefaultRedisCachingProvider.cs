@@ -1,4 +1,6 @@
-﻿using EasyCaching.Redis.DistributedLock;
+﻿using System.Threading;
+using System.Threading.Tasks;
+using EasyCaching.Redis.DistributedLock;
 
 namespace EasyCaching.Redis
 {
@@ -229,6 +231,7 @@ namespace EasyCaching.Redis
 
             _cache.KeyDelete(cacheKey);
         }
+  
 
         /// <summary>
         /// Set the specified cacheKey, cacheValue and expiration.
@@ -282,6 +285,18 @@ namespace EasyCaching.Redis
                 _logger?.LogInformation($"RemoveByPrefix : prefix = {prefix}");
 
             var redisKeys = this.SearchRedisKeys(prefix);
+
+            _cache.KeyDelete(redisKeys);
+        }
+        
+        public override void BaseRemoveByPattern(string pattern)
+        {
+            ArgumentCheck.NotNullOrWhiteSpace(pattern, nameof(pattern));
+
+            if (_options.EnableLogging)
+                _logger?.LogInformation($"RemoveByPattern : pattern = {pattern}");
+
+            var redisKeys = this.SearchRedisKeys(pattern);
 
             _cache.KeyDelete(redisKeys);
         }
@@ -356,7 +371,7 @@ namespace EasyCaching.Redis
 
             return prefix;
         }
-
+        
         /// <summary>
         /// Sets all.
         /// </summary>

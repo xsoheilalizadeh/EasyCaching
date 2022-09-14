@@ -229,6 +229,18 @@
             await _cache.KeyDeleteAsync(redisKeys);
         }
 
+        public override async Task BaseRemoveByPatternAsync(string pattern, CancellationToken cancellationToken = default)
+        {
+            ArgumentCheck.NotNullOrWhiteSpace(pattern, nameof(pattern));
+
+            if (_options.EnableLogging)
+                _logger?.LogInformation($"BaseRemoveByPatternAsync : pattern = {pattern}");
+
+            var redisKeys = this.SearchRedisKeys(pattern);
+
+            await _cache.KeyDeleteAsync(redisKeys);
+        }
+
         /// <summary>
         /// Sets all async.
         /// </summary>

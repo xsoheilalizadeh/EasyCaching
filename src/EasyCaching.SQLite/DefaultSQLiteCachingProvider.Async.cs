@@ -237,9 +237,23 @@
             if (_options.EnableLogging)
                 _logger?.LogInformation($"RemoveByPrefixAsync : prefix = {prefix}");
 
-            await _cache.ExecuteAsync(new CommandDefinition(ConstSQL.REMOVEBYPREFIXSQL, new
+            await _cache.ExecuteAsync(new CommandDefinition(ConstSQL.REMOVEBYLIKESQL, new
             {
                 cachekey = string.Concat(prefix, "%"),
+                name = _name
+            }, cancellationToken: cancellationToken));
+        }
+
+        public override async Task BaseRemoveByPatternAsync(string pattern, CancellationToken cancellationToken = default)
+        {
+            ArgumentCheck.NotNullOrWhiteSpace(pattern, nameof(pattern));
+
+            if (_options.EnableLogging)
+                _logger?.LogInformation($"RemoveByPatternAsync : pattern = {pattern}");
+
+            await _cache.ExecuteAsync(new CommandDefinition(ConstSQL.REMOVEBYLIKESQL, new
+            {
+                cachekey = pattern.Replace('*', '%'),
                 name = _name
             }, cancellationToken: cancellationToken));
         }

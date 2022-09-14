@@ -71,7 +71,7 @@
         /// <summary>
         /// The removebyprefixsql.
         /// </summary>
-        public const string REMOVEBYPREFIXSQL = @"DELETE FROM [easycaching] WHERE [cachekey] like @cachekey  AND [name]=@name";
+        public const string REMOVEBYLIKESQL = @"DELETE FROM [easycaching] WHERE [cachekey] like @cachekey  AND [name]=@name";
 
         /// <summary>
         /// The existssql.

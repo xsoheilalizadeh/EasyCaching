@@ -224,6 +224,19 @@
                 _logger?.LogInformation($"RemoveByPrefixAsync : prefix = {prefix} , count = {count}");
         }
 
+        public override async Task BaseRemoveByPatternAsync(string pattern, CancellationToken cancellationToken = default)
+        {
+            ArgumentCheck.NotNullOrWhiteSpace(pattern, nameof(pattern));
+
+            var searchPattern = this.ProcessSearchKeyPattern(pattern);
+            var searchKey = this.HandleSearchKeyPattern(pattern);
+            
+            var count = await Task.Run(() => _cache.RemoveByPattern(pattern, searchKey, searchPattern), cancellationToken);
+
+            if (_options.EnableLogging)
+                _logger?.LogInformation($"BaseRemoveByPatternAsync : pattern = {pattern} , count = {count}");
+        }
+
         /// <summary>
         /// Sets all async.
         /// </summary>

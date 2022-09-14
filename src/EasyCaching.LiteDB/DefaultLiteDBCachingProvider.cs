@@ -196,6 +196,7 @@
             ArgumentCheck.NotNullOrWhiteSpace(cacheKey, nameof(cacheKey));
             _cache.DeleteMany(c => c.cachekey == cacheKey);
         }
+        
 
         /// <summary>
         /// Set the specified cacheKey, cacheValue and expiration.
@@ -237,6 +238,36 @@
                 _logger?.LogInformation($"RemoveByPrefix : prefix = {prefix}");
 
             _cache.DeleteMany(c => c.cachekey.StartsWith(prefix));
+        }
+        
+        public override void BaseRemoveByPattern(string pattern)
+        {
+            ArgumentCheck.NotNullOrWhiteSpace(pattern, nameof(pattern));
+
+            if (_options.EnableLogging)
+                _logger?.LogInformation($"RemoveByPattern : pattern = {pattern}");
+            
+            var searchPattern = this.ProcessSearchKeyPattern(pattern);
+            var searchKey = this.HandleSearchKeyPattern(pattern);
+
+            _cache.DeleteMany(c => Predicate(c.cachekey, searchKey, searchPattern));
+        }
+        
+        private bool Predicate(string key, string searchKey, SearchKeyPattern searchKeyPattern)
+        {
+            switch (searchKeyPattern)
+            {
+                case SearchKeyPattern.Postfix:
+                    return key.EndsWith(searchKey, StringComparison.Ordinal);
+                case SearchKeyPattern.Prefix:
+                    return key.StartsWith(searchKey, StringComparison.Ordinal);
+                case SearchKeyPattern.Contains:
+                    return key.Contains(searchKey);
+                case SearchKeyPattern.Exact:
+                    return key.Equals(searchKey, StringComparison.Ordinal);
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(searchKeyPattern), searchKeyPattern, null);
+            }
         }
 
         /// <summary>

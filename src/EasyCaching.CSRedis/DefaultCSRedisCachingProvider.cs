@@ -401,6 +401,21 @@
             }
         }
 
+        public override void BaseRemoveByPattern(string pattern)
+        {
+            ArgumentCheck.NotNullOrWhiteSpace(pattern, nameof(pattern));
+
+            if (_options.EnableLogging)
+                _logger?.LogInformation($"BaseRemoveByPattern : pattern = {pattern}");
+
+            var redisKeys = this.SearchRedisKeys(pattern);
+
+            foreach (var item in redisKeys)
+            {
+                _cache.Del(item);
+            }
+        }
+
         /// <summary>
         /// Set the specified cacheKey, cacheValue and expiration.
         /// </summary>
