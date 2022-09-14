@@ -973,7 +973,7 @@ namespace EasyCaching.Core
 
         protected string HandleSearchKeyPattern(string pattern)
         {
-            return new System.Text.RegularExpressions.Regex("^\\*+").Replace(pattern, "");
+            return pattern.Replace("*", string.Empty);
         }
     }
 }

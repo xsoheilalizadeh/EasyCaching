@@ -287,7 +287,7 @@ namespace EasyCaching.UnitTests
             Assert.False(val4.HasValue);
         }
         
-              [Theory]
+        [Theory]
         [InlineData("WithKeyPrefix")]
         [InlineData("NotKeyPrefix")]
         public void RemoveByKeyPatternTest(string provider)
@@ -299,8 +299,8 @@ namespace EasyCaching.UnitTests
             WithKeyPrefix.Set("garden:flowerspots:test", "ok", TimeSpan.FromSeconds(10));
             WithKeyPrefix.Set("boo:foo", "ok", TimeSpan.FromSeconds(10));
             WithKeyPrefix.Set("boo:test:foo", "ok", TimeSpan.FromSeconds(10));
-            WithKeyPrefix.Set("sky:birds:foo", "ok", TimeSpan.FromSeconds(10));
-            WithKeyPrefix.Set("sky:birds:test:foo", "ok", TimeSpan.FromSeconds(10));
+            WithKeyPrefix.Set("sky:birds:bar", "ok", TimeSpan.FromSeconds(10));
+            WithKeyPrefix.Set("sky:birds:test:bar", "ok", TimeSpan.FromSeconds(10));
             WithKeyPrefix.Set("akey", "ok", TimeSpan.FromSeconds(10));
 
             var val1 = WithKeyPrefix.Get<string>("garden:pots:flowers");
@@ -308,8 +308,8 @@ namespace EasyCaching.UnitTests
             var val3 = WithKeyPrefix.Get<string>("garden:flowerspots:test");
             var val4 = WithKeyPrefix.Get<string>("boo:foo");
             var val5 = WithKeyPrefix.Get<string>("boo:test:foo");
-            var val6 = WithKeyPrefix.Get<string>("sky:birds:foo");
-            var val7 = WithKeyPrefix.Get<string>("sky:birds:test:foo");
+            var val6 = WithKeyPrefix.Get<string>("sky:birds:bar");
+            var val7 = WithKeyPrefix.Get<string>("sky:birds:test:bar");
             var val8 = WithKeyPrefix.Get<string>("akey");
             
             Assert.True(val1.HasValue);
@@ -338,8 +338,8 @@ namespace EasyCaching.UnitTests
             var val11 = WithKeyPrefix.Get<string>("garden:flowerspots:test");
             var val12 = WithKeyPrefix.Get<string>("boo:foo");
             var val13 = WithKeyPrefix.Get<string>("boo:test:foo");
-            var val14 = WithKeyPrefix.Get<string>("sky:birds:foo");
-            var val15 = WithKeyPrefix.Get<string>("sky:birds:test:foo");
+            var val14 = WithKeyPrefix.Get<string>("sky:birds:bar");
+            var val15 = WithKeyPrefix.Get<string>("sky:birds:test:bar");
             var val16 = WithKeyPrefix.Get<string>("akey");
             
             Assert.False(val9.HasValue);
