@@ -220,7 +220,7 @@
 
         public override Task BaseRemoveByPatternAsync(string pattern, CancellationToken cancellationToken = default)
         {
-            throw new NotImplementedException();
+            throw new NotSupportedException("RemoveByPattern is not supported in memcached provider.");
         }
 
         /// <summary>

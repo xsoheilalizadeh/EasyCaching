@@ -266,7 +266,7 @@
         
         public override void BaseRemoveByPattern(string pattern)
         {
-            throw new NotImplementedException();
+            throw new NotSupportedException("RemoveByPattern is not supported in memcached provider.");
         }
 
         /// <summary>
