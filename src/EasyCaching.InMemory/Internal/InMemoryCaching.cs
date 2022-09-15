@@ -267,7 +267,7 @@
             return RemoveAll(keysToRemove);
         }
 
-        public int RemoveByPattern(string searchKeyPattern, string searchKey, SearchKeyPattern searchPattern)
+        public int RemoveByPattern(string searchKey, SearchKeyPattern searchPattern)
         {
             var keysToRemove = _memory.Keys.Where(x => FilterByPattern(x, searchKey, searchPattern)).ToList();
             

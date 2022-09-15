@@ -229,6 +229,11 @@
             await _cache.KeyDeleteAsync(redisKeys);
         }
 
+        /// <summary>
+        /// Removes cached item by pattern async.
+        /// </summary>
+        /// <param name="pattern">Pattern of CacheKey.</param>
+        /// <param name="cancellationToken">CancellationToken</param>
         public override async Task BaseRemoveByPatternAsync(string pattern, CancellationToken cancellationToken = default)
         {
             ArgumentCheck.NotNullOrWhiteSpace(pattern, nameof(pattern));

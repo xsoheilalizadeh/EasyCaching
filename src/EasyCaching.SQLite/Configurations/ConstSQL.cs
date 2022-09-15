@@ -69,7 +69,7 @@
         public const string REMOVESQL = @"DELETE FROM [easycaching] WHERE [cachekey] = @cachekey AND [name] = @name ";
 
         /// <summary>
-        /// The removebyprefixsql.
+        /// The removebylikesql.
         /// </summary>
         public const string REMOVEBYLIKESQL = @"DELETE FROM [easycaching] WHERE [cachekey] like @cachekey  AND [name]=@name";
 

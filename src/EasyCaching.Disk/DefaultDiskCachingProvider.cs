@@ -1,6 +1,4 @@
-﻿using System.Threading.Tasks;
-
-namespace EasyCaching.Disk
+﻿namespace EasyCaching.Disk
 {
     using EasyCaching.Core;
     using EasyCaching.Core.DistributedLock;

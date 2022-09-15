@@ -1,6 +1,4 @@
-﻿using System.Threading;
-using System.Threading.Tasks;
-using EasyCaching.Redis.DistributedLock;
+﻿using EasyCaching.Redis.DistributedLock;
 
 namespace EasyCaching.Redis
 {
@@ -289,6 +287,10 @@ namespace EasyCaching.Redis
             _cache.KeyDelete(redisKeys);
         }
         
+        /// <summary>
+        /// Removes cached item by pattern async.
+        /// </summary>
+        /// <param name="pattern">Pattern of CacheKey.</param>
         public override void BaseRemoveByPattern(string pattern)
         {
             ArgumentCheck.NotNullOrWhiteSpace(pattern, nameof(pattern));

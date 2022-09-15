@@ -237,6 +237,10 @@
             _cache.Execute(ConstSQL.REMOVEBYLIKESQL, new { cachekey = string.Concat(prefix, "%"), name = _name });
         }
 
+        /// <summary>
+        /// Removes cached item by pattern async.
+        /// </summary>
+        /// <param name="pattern">Pattern of CacheKey.</param>
         public override void BaseRemoveByPattern(string pattern)
         {
             ArgumentCheck.NotNullOrWhiteSpace(pattern, nameof(pattern));

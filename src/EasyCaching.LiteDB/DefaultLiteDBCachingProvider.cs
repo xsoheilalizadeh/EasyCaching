@@ -1,5 +1,4 @@
-﻿using System.Linq.Expressions;
-
+﻿
 namespace EasyCaching.LiteDB
 {
     using EasyCaching.Core;
@@ -8,6 +7,7 @@ namespace EasyCaching.LiteDB
     using System;
     using System.Collections.Generic;
     using System.Linq;
+    using System.Linq.Expressions;
 
     /// <summary>
     /// LiteDBCaching provider.
@@ -242,6 +242,10 @@ namespace EasyCaching.LiteDB
             _cache.DeleteMany(c => c.cachekey.StartsWith(prefix));
         }
         
+        /// <summary>
+        /// Removes cached item by pattern async.
+        /// </summary>
+        /// <param name="pattern">Pattern of CacheKey.</param>
         public override void BaseRemoveByPattern(string pattern)
         {
             ArgumentCheck.NotNullOrWhiteSpace(pattern, nameof(pattern));
