@@ -1,862 +1,810 @@
-﻿namespace EasyCaching.HybridCache
+﻿using EasyCaching.Core.DistributedLock;
+
+namespace EasyCaching.Core
 {
     using System;
     using System.Collections.Generic;
+    using System.Diagnostics;
     using System.Linq;
     using System.Threading;
     using System.Threading.Tasks;
-    using EasyCaching.Core;
-    using EasyCaching.Core.Bus;
-    using Microsoft.Extensions.Logging;
-    using Polly;
-    using Polly.Fallback;
-    using Polly.Retry;
-    using Polly.Wrap;
+    using EasyCaching.Core.Configurations;
+    using EasyCaching.Core.Diagnostics;
 
-    /// <summary>
-    /// Hybrid caching provider.
-    /// </summary>
-    public class HybridCachingProvider : IHybridCachingProvider
+    public abstract class EasyCachingAbstractProvider : IEasyCachingProvider
     {
-        /// <summary>
-        /// The local cache.
-        /// </summary>
-        private readonly IEasyCachingProvider _localCache;
-        /// <summary>
-        /// The distributed cache.
-        /// </summary>
-        private readonly IEasyCachingProvider _distributedCache;
-        /// <summary>
-        /// The bus.
-        /// </summary>
-        private readonly IEasyCachingBus _bus;
-        /// <summary>
-        /// The options.
-        /// </summary>
-        private readonly HybridCachingOptions _options;
-        /// <summary>
-        /// The logger.
-        /// </summary>
-        private readonly ILogger _logger;
-        /// <summary>
-        /// The cache identifier.
-        /// </summary>
-        private readonly string _cacheId;
-        /// <summary>
-        /// The name.
-        /// </summary>
-        private readonly string _name;
+        protected static readonly DiagnosticListener s_diagnosticListener =
+                    new DiagnosticListener(EasyCachingDiagnosticListenerExtensions.DiagnosticListenerName);
 
-        private readonly AsyncPolicyWrap _busAsyncWrap;
-        private readonly PolicyWrap _busSyncWrap;
-        private readonly RetryPolicy retryPolicy;
-        private readonly AsyncRetryPolicy retryAsyncPolicy;
-        private readonly FallbackPolicy fallbackPolicy;
-        private readonly AsyncFallbackPolicy fallbackAsyncPolicy;
+        private readonly IDistributedLockFactory _lockFactory;
+        private readonly BaseProviderOptions _options;
 
-        public string Name => _name;
+        protected string ProviderName { get; set; }
+        protected bool IsDistributedProvider { get; set; }
+        protected int ProviderMaxRdSecond { get; set; }
+        protected CachingProviderType ProviderType { get; set; }
+        protected CacheStats ProviderStats { get; set; }
 
-        /// <summary>
-        /// Initializes a new instance of the <see cref="T:EasyCaching.HybridCache.HybridCachingProvider"/> class.
-        /// </summary>
-        /// <param name="name">Name.</param>
-        /// <param name="optionsAccs">Options accs.</param>
-        /// <param name="factory">Providers factory</param>
-        /// <param name="bus">Bus.</param>
-        /// <param name="loggerFactory">Logger factory.</param>
-        public HybridCachingProvider(
-            string name
-            , HybridCachingOptions optionsAccs
-            , IEasyCachingProviderFactory factory
-            , IEasyCachingBus bus = null
-            , ILoggerFactory loggerFactory = null
-            )
+        public string Name => this.ProviderName;
+        public bool IsDistributedCache => this.IsDistributedProvider;
+        public bool UseLock => _lockFactory != null;
+        public int MaxRdSecond => this.ProviderMaxRdSecond;
+        public CachingProviderType CachingProviderType => this.ProviderType;
+        public CacheStats CacheStats => this.ProviderStats;
+
+        public object Database => BaseGetDatabse();
+
+        protected EasyCachingAbstractProvider() { }
+
+        protected EasyCachingAbstractProvider(IDistributedLockFactory lockFactory, BaseProviderOptions options)
         {
-            ArgumentCheck.NotNull(factory, nameof(factory));
-
-            this._name = name;
-            this._options = optionsAccs;
-
-            ArgumentCheck.NotNullOrWhiteSpace(_options.TopicName, nameof(_options.TopicName));
-
-            this._logger = loggerFactory?.CreateLogger<HybridCachingProvider>();
-
-            // Here use the order to distinguish traditional provider
-            var local = factory.GetCachingProvider(_options.LocalCacheProviderName);
-            if (local.IsDistributedCache) throw new NotFoundCachingProviderException("Can not found any local caching providers.");
-            else this._localCache = local;
-
-            // Here use the order to distinguish traditional provider
-            var distributed = factory.GetCachingProvider(_options.DistributedCacheProviderName);
-
-            if (!distributed.IsDistributedCache) throw new NotFoundCachingProviderException("Can not found any distributed caching providers.");
-            else this._distributedCache = distributed;
-
-            this._bus = bus ?? NullEasyCachingBus.Instance;
-            this._bus.Subscribe(_options.TopicName, OnMessage);
-
-            this._cacheId = Guid.NewGuid().ToString("N");
-
-
-            // policy
-
-            retryAsyncPolicy = Policy.Handle<Exception>()
-                    .WaitAndRetryAsync(this._options.BusRetryCount, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt - 1)));
-
-            retryPolicy = Policy.Handle<Exception>()
-                   .WaitAndRetry(this._options.BusRetryCount, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt - 1)));
-
-            fallbackPolicy = Policy.Handle<Exception>().Fallback(() => { });
-
-            fallbackAsyncPolicy = Policy.Handle<Exception>().FallbackAsync(ct =>
-            {
-                return Task.CompletedTask;
-            });
-
-            _busSyncWrap = Policy.Wrap(fallbackPolicy, retryPolicy);
-            _busAsyncWrap = Policy.WrapAsync(fallbackAsyncPolicy, retryAsyncPolicy);
+            _lockFactory = lockFactory;
+            _options = options;
         }
 
-        /// <summary>
-        /// Ons the message.
-        /// </summary>
-        /// <param name="message">Message.</param>
-        private void OnMessage(EasyCachingMessage message)
-        {
-            // each clients will recive the message, current client should ignore.
-            if (!string.IsNullOrWhiteSpace(message.Id) && message.Id.Equals(_cacheId, StringComparison.OrdinalIgnoreCase))
-                return;
+        public abstract object BaseGetDatabse();
+        public abstract bool BaseExists(string cacheKey);
+        public abstract Task<bool> BaseExistsAsync(string cacheKey, CancellationToken cancellationToken = default);
+        public abstract void BaseFlush();
+        public abstract Task BaseFlushAsync(CancellationToken cancellationToken = default);
+        public abstract CacheValue<T> BaseGet<T>(string cacheKey, Func<T> dataRetriever, TimeSpan expiration);
+        public abstract CacheValue<T> BaseGet<T>(string cacheKey);
+        public abstract IDictionary<string, CacheValue<T>> BaseGetAll<T>(IEnumerable<string> cacheKeys);
+        public abstract Task<IDictionary<string, CacheValue<T>>> BaseGetAllAsync<T>(IEnumerable<string> cacheKeys, CancellationToken cancellationToken = default);
+        public abstract Task<CacheValue<T>> BaseGetAsync<T>(string cacheKey, Func<Task<T>> dataRetriever, TimeSpan expiration, CancellationToken cancellationToken = default);
+        public abstract Task<object> BaseGetAsync(string cacheKey, Type type, CancellationToken cancellationToken = default);
+        public abstract Task<CacheValue<T>> BaseGetAsync<T>(string cacheKey, CancellationToken cancellationToken = default);
+        public abstract IDictionary<string, CacheValue<T>> BaseGetByPrefix<T>(string prefix);
+        public abstract Task<IDictionary<string, CacheValue<T>>> BaseGetByPrefixAsync<T>(string prefix, CancellationToken cancellationToken = default);
+        public abstract int BaseGetCount(string prefix = "");
+        public abstract Task<int> BaseGetCountAsync(string prefix = "", CancellationToken cancellationToken = default);
+        public abstract void BaseRemove(string cacheKey);
+        public abstract void BaseRemoveAll(IEnumerable<string> cacheKeys);
+        public abstract Task BaseRemoveAllAsync(IEnumerable<string> cacheKeys, CancellationToken cancellation = default);
+        public abstract Task BaseRemoveAsync(string cacheKey, CancellationToken cancellationToken = default);
+        public abstract void BaseRemoveByPrefix(string prefix);
+        public abstract Task BaseRemoveByPrefixAsync(string prefix, CancellationToken cancellationToken = default);
+        public abstract void BaseSet<T>(string cacheKey, T cacheValue, TimeSpan expiration);
+        public abstract void BaseSetAll<T>(IDictionary<string, T> values, TimeSpan expiration);
+        public abstract Task BaseSetAllAsync<T>(IDictionary<string, T> values, TimeSpan expiration, CancellationToken cancellationToken = default);
+        public abstract Task BaseSetAsync<T>(string cacheKey, T cacheValue, TimeSpan expiration, CancellationToken cancellationToken = default);
+        public abstract bool BaseTrySet<T>(string cacheKey, T cacheValue, TimeSpan expiration);
+        public abstract Task<bool> BaseTrySetAsync<T>(string cacheKey, T cacheValue, TimeSpan expiration, CancellationToken cancellationToken = default);
 
-            // remove by prefix
-            if (message.IsPrefix)
-            {
-                var prefix = message.CacheKeys.First();
+        public abstract TimeSpan BaseGetExpiration(string cacheKey);
+        public abstract Task<TimeSpan> BaseGetExpirationAsync(string cacheKey, CancellationToken cancellationToken = default);
+        public abstract ProviderInfo BaseGetProviderInfo();
 
-                _localCache.RemoveByPrefix(prefix);
-
-                LogMessage($"remove local cache that prefix is {prefix}");
-
-                return;
-            }
-
-            foreach (var item in message.CacheKeys)
-            {
-                _localCache.Remove(item);
-
-                LogMessage($"remove local cache that cache key is {item}");
-            }
-        }
-
-        /// <summary>
-        /// Exists the specified cacheKey.
-        /// </summary>
-        /// <returns>The exists.</returns>
-        /// <param name="cacheKey">Cache key.</param>
         public bool Exists(string cacheKey)
         {
-            ArgumentCheck.NotNullOrWhiteSpace(cacheKey, nameof(cacheKey));
-            bool flag;
-
-            // Circuit Breaker may be more better
+            var operationId = s_diagnosticListener.WriteExistsCacheBefore(new BeforeExistsRequestEventData(CachingProviderType.ToString(), Name, nameof(Exists), cacheKey));
+            Exception e = null;
             try
             {
-                flag = _distributedCache.Exists(cacheKey);
-                return flag;
+                return BaseExists(cacheKey);
             }
             catch (Exception ex)
             {
-                LogMessage($"Check cache key exists error [{cacheKey}] ", ex);
+                e = ex;
+                throw;
             }
-
-            flag = _localCache.Exists(cacheKey);
-
-            return flag;
-        }
-
-        /// <summary>
-        /// Existses the specified cacheKey async.
-        /// </summary>
-        /// <returns>The async.</returns>
-        /// <param name="cacheKey">Cache key.</param>
-        /// <param name="cancellationToken">CancellationToken</param>
-        public async Task<bool> ExistsAsync(string cacheKey, CancellationToken cancellationToken = default)
-        {
-            ArgumentCheck.NotNullOrWhiteSpace(cacheKey, nameof(cacheKey));
-
-            bool flag;
-
-            // Circuit Breaker may be more better
-            try
+            finally
             {
-                flag = await _distributedCache.ExistsAsync(cacheKey, cancellationToken);
-                return flag;
-            }
-            catch (Exception ex)
-            {
-                LogMessage($"Check cache key [{cacheKey}] exists error", ex);
-            }
-
-            flag = await _localCache.ExistsAsync(cacheKey, cancellationToken);
-            return flag;
-        }
-
-        /// <summary>
-        /// Get the specified cacheKey.
-        /// </summary>
-        /// <returns>The get.</returns>
-        /// <param name="cacheKey">Cache key.</param>
-        /// <typeparam name="T">The 1st type parameter.</typeparam>
-        public CacheValue<T> Get<T>(string cacheKey)
-        {
-            ArgumentCheck.NotNullOrWhiteSpace(cacheKey, nameof(cacheKey));
-
-            var cacheValue = _localCache.Get<T>(cacheKey);
-
-            if (cacheValue.HasValue)
-            {
-                return cacheValue;
-            }
-
-            LogMessage($"local cache can not get the value of {cacheKey}");
-
-            // Circuit Breaker may be more better
-            try
-            {
-                cacheValue = _distributedCache.Get<T>(cacheKey);
-            }
-            catch (Exception ex)
-            {
-                LogMessage($"distributed cache get error, [{cacheKey}]", ex);
-            }
-
-            if (cacheValue.HasValue)
-            {
-                TimeSpan ts = GetExpiration(cacheKey);
-               
-                _localCache.Set(cacheKey, cacheValue.Value, ts);
-
-                return cacheValue;
-            }
-
-            LogMessage($"distributed cache can not get the value of {cacheKey}");
-
-            return CacheValue<T>.NoValue;
-        }
-
-        /// <summary>
-        /// Gets the specified cacheKey async.
-        /// </summary>
-        /// <returns>The async.</returns>
-        /// <param name="cacheKey">Cache key.</param>
-        /// <param name="cancellationToken">CancellationToken</param>
-        /// <typeparam name="T">The 1st type parameter.</typeparam>
-        public async Task<CacheValue<T>> GetAsync<T>(string cacheKey, CancellationToken cancellationToken = default)
-        {
-            ArgumentCheck.NotNullOrWhiteSpace(cacheKey, nameof(cacheKey));
-
-            var cacheValue = await _localCache.GetAsync<T>(cacheKey, cancellationToken);
-
-            if (cacheValue.HasValue)
-            {
-                return cacheValue;
-            }
-
-            LogMessage($"local cache can not get the value of {cacheKey}");
-
-            try
-            {
-                cacheValue = await _distributedCache.GetAsync<T>(cacheKey, cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                LogMessage($"distributed cache get error, [{cacheKey}]", ex);
-            }
-
-            if (cacheValue.HasValue)
-            {
-                TimeSpan ts = await GetExpirationAsync(cacheKey, cancellationToken);
-
-                await _localCache.SetAsync(cacheKey, cacheValue.Value, ts, cancellationToken);
-
-                return cacheValue;
-            }
-
-            LogMessage($"distributed cache can not get the value of {cacheKey}");
-
-            return CacheValue<T>.NoValue;
-        }
-
-        /// <summary>
-        /// Remove the specified cacheKey.
-        /// </summary>
-        /// <param name="cacheKey">Cache key.</param>
-        public void Remove(string cacheKey)
-        {
-            ArgumentCheck.NotNullOrWhiteSpace(cacheKey, nameof(cacheKey));
-
-            try
-            {
-                // distributed cache at first
-                _distributedCache.Remove(cacheKey);
-            }
-            catch (Exception ex)
-            {
-                LogMessage($"remove cache key [{cacheKey}] error", ex);
-            }
-
-            _localCache.Remove(cacheKey);
-
-            // send message to bus 
-            _busSyncWrap.Execute(() => _bus.Publish(_options.TopicName, new EasyCachingMessage { Id = _cacheId, CacheKeys = new string[] { cacheKey } }));
-        }
-
-        /// <summary>
-        /// Removes the specified cacheKey async.
-        /// </summary>
-        /// <returns>The async.</returns>
-        /// <param name="cacheKey">Cache key.</param>
-        /// <param name="cancellationToken">CancellationToken</param>
-        public async Task RemoveAsync(string cacheKey, CancellationToken cancellationToken = default)
-        {
-            ArgumentCheck.NotNullOrWhiteSpace(cacheKey, nameof(cacheKey));
-
-            try
-            {
-                // distributed cache at first
-                await _distributedCache.RemoveAsync(cacheKey, cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                LogMessage($"remove cache key [{cacheKey}] error", ex);
-            }
-
-            await _localCache.RemoveAsync(cacheKey, cancellationToken);
-
-            // send message to bus 
-            await _busAsyncWrap.ExecuteAsync(async (ct) => await _bus.PublishAsync(_options.TopicName, new EasyCachingMessage { Id = _cacheId, CacheKeys = new string[] { cacheKey } }, ct), cancellationToken);
-        }
-
-        /// <summary>
-        /// Set the specified cacheKey, cacheValue and expiration.
-        /// </summary>
-        /// <param name="cacheKey">Cache key.</param>
-        /// <param name="cacheValue">Cache value.</param>
-        /// <param name="expiration">Expiration.</param>
-        /// <typeparam name="T">The 1st type parameter.</typeparam>
-        public void Set<T>(string cacheKey, T cacheValue, TimeSpan expiration)
-        {
-            ArgumentCheck.NotNullOrWhiteSpace(cacheKey, nameof(cacheKey));
-
-            _localCache.Set(cacheKey, cacheValue, expiration);
-
-            try
-            {
-                _distributedCache.Set(cacheKey, cacheValue, expiration);
-            }
-            catch (Exception ex)
-            {
-                LogMessage($"set cache key [{cacheKey}] error", ex);
-            }
-
-            // When create/update cache, send message to bus so that other clients can remove it.
-            _busSyncWrap.Execute(() => _bus.Publish(_options.TopicName, new EasyCachingMessage { Id = _cacheId, CacheKeys = new string[] { cacheKey } }));
-        }
-
-        /// <summary>
-        /// Sets the specified cacheKey, cacheValue and expiration async.
-        /// </summary>
-        /// <returns>The async.</returns>
-        /// <param name="cacheKey">Cache key.</param>
-        /// <param name="cacheValue">Cache value.</param>
-        /// <param name="expiration">Expiration.</param>
-        /// <param name="cancellationToken">CancellationToken</param>
-        /// <typeparam name="T">The 1st type parameter.</typeparam>
-        public async Task SetAsync<T>(string cacheKey, T cacheValue, TimeSpan expiration, CancellationToken cancellationToken = default)
-        {
-            ArgumentCheck.NotNullOrWhiteSpace(cacheKey, nameof(cacheKey));
-
-            await _localCache.SetAsync(cacheKey, cacheValue, expiration, cancellationToken);
-
-            try
-            {
-                await _distributedCache.SetAsync(cacheKey, cacheValue, expiration, cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                LogMessage($"set cache key [{cacheKey}] error", ex);
-            }
-
-            // When create/update cache, send message to bus so that other clients can remove it.
-            await _busAsyncWrap.ExecuteAsync(async (ct) => await _bus.PublishAsync(_options.TopicName, new EasyCachingMessage { Id = _cacheId, CacheKeys = new string[] { cacheKey } }, ct), cancellationToken);
-        }
-
-        /// <summary>
-        /// Tries the set.
-        /// </summary>
-        /// <returns><c>true</c>, if set was tryed, <c>false</c> otherwise.</returns>
-        /// <param name="cacheKey">Cache key.</param>
-        /// <param name="cacheValue">Cache value.</param>
-        /// <param name="expiration">Expiration.</param>
-        /// <typeparam name="T">The 1st type parameter.</typeparam>
-        public bool TrySet<T>(string cacheKey, T cacheValue, TimeSpan expiration)
-        {
-            ArgumentCheck.NotNullOrWhiteSpace(cacheKey, nameof(cacheKey));
-
-            bool distributedError = false;
-            bool flag = false;
-
-            try
-            {
-                flag = _distributedCache.TrySet(cacheKey, cacheValue, expiration);
-            }
-            catch (Exception ex)
-            {
-                distributedError = true;
-                LogMessage($"tryset cache key [{cacheKey}] error", ex);
-            }
-
-            if (flag && !distributedError)
-            {
-                // When we TrySet succeed in distributed cache, we should Set this cache to local cache.
-                // It's mainly to prevent the cache value was changed
-                _localCache.Set(cacheKey, cacheValue, expiration);
-            }
-
-            // distributed cache occur error, have a try with local cache
-            if (distributedError)
-            {
-                flag = _localCache.TrySet(cacheKey, cacheValue, expiration);
-            }
-
-            if (flag)
-            {
-                // Here should send message to bus due to cache was set successfully.
-                _busSyncWrap.Execute(() => _bus.Publish(_options.TopicName, new EasyCachingMessage { Id = _cacheId, CacheKeys = new string[] { cacheKey } }));
-            }
-
-            return flag;
-        }
-
-        /// <summary>
-        /// Tries the set async.
-        /// </summary>
-        /// <returns>The set async.</returns>
-        /// <param name="cacheKey">Cache key.</param>
-        /// <param name="cacheValue">Cache value.</param>
-        /// <param name="expiration">Expiration.</param>
-        /// <param name="cancellationToken">CancellationToken</param>
-        /// <typeparam name="T">The 1st type parameter.</typeparam>
-        public async Task<bool> TrySetAsync<T>(string cacheKey, T cacheValue, TimeSpan expiration, CancellationToken cancellationToken = default)
-        {
-            ArgumentCheck.NotNullOrWhiteSpace(cacheKey, nameof(cacheKey));
-
-            bool distributedError = false;
-            bool flag = false;
-
-            try
-            {
-                flag = await _distributedCache.TrySetAsync(cacheKey, cacheValue, expiration, cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                distributedError = true;
-                LogMessage($"tryset cache key [{cacheKey}] error", ex);
-            }
-
-            if (flag && !distributedError)
-            {
-                // When we TrySet succeed in distributed cache, we should Set this cache to local cache.
-                // It's mainly to prevent the cache value was changed
-                await _localCache.SetAsync(cacheKey, cacheValue, expiration, cancellationToken);
-            }
-
-            // distributed cache occur error, have a try with local cache
-            if (distributedError)
-            {
-                flag = await _localCache.TrySetAsync(cacheKey, cacheValue, expiration, cancellationToken);
-            }
-
-            if (flag)
-            {
-                // Here should send message to bus due to cache was set successfully.
-                await _busAsyncWrap.ExecuteAsync(async (ct) => await _bus.PublishAsync(_options.TopicName, new EasyCachingMessage { Id = _cacheId, CacheKeys = new string[] { cacheKey } }, ct), cancellationToken);
-            }
-
-            return flag;
-        }
-
-        /// <summary>
-        /// Sets all.
-        /// </summary>
-        /// <param name="value">Value.</param>
-        /// <param name="expiration">Expiration.</param>
-        /// <typeparam name="T">The 1st type parameter.</typeparam>
-        public void SetAll<T>(IDictionary<string, T> value, TimeSpan expiration)
-        {
-            _localCache.SetAll(value, expiration);
-
-            try
-            {
-                _distributedCache.SetAll(value, expiration);
-            }
-            catch (Exception ex)
-            {
-                LogMessage($"set all from distributed provider error [{string.Join(",", value.Keys)}]", ex);
-            }
-
-            // send message to bus 
-            _busSyncWrap.Execute(() => _bus.Publish(_options.TopicName, new EasyCachingMessage { Id = _cacheId, CacheKeys = value.Keys.ToArray(), IsPrefix = false }));
-        }
-
-        /// <summary>
-        /// Sets all async.
-        /// </summary>
-        /// <returns>The all async.</returns>
-        /// <param name="value">Value.</param>
-        /// <param name="expiration">Expiration.</param>
-        /// <param name="cancellationToken">CancellationToken</param>
-        /// <typeparam name="T">The 1st type parameter.</typeparam>
-        public async Task SetAllAsync<T>(IDictionary<string, T> value, TimeSpan expiration, CancellationToken cancellationToken = default)
-        {
-            await _localCache.SetAllAsync(value, expiration, cancellationToken);
-
-            try
-            {
-                await _distributedCache.SetAllAsync(value, expiration, cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                LogMessage($"set all from distributed provider error [{string.Join(",", value.Keys)}]", ex);
-            }
-
-            // send message to bus 
-            await _busAsyncWrap.ExecuteAsync(async (ct) => await _bus.PublishAsync(_options.TopicName, new EasyCachingMessage { Id = _cacheId, CacheKeys = value.Keys.ToArray(), IsPrefix = false }, ct), cancellationToken);
-        }
-
-        /// <summary>
-        /// Removes all.
-        /// </summary>
-        /// <param name="cacheKeys">Cache keys.</param>
-        public void RemoveAll(IEnumerable<string> cacheKeys)
-        {
-            ArgumentCheck.NotNullAndCountGTZero(cacheKeys, nameof(cacheKeys));
-
-            try
-            {
-                _distributedCache.RemoveAllAsync(cacheKeys);
-            }
-            catch (Exception ex)
-            {
-                LogMessage($"remove all from distributed provider error [{string.Join(",", cacheKeys)}]", ex);
-            }
-
-            _localCache.RemoveAll(cacheKeys);
-
-            // send message to bus in order to notify other clients.
-            _busSyncWrap.Execute(() => _bus.Publish(_options.TopicName, new EasyCachingMessage { Id = _cacheId, CacheKeys = cacheKeys.ToArray() }));
-        }
-
-        /// <summary>
-        /// Removes all async.
-        /// </summary>
-        /// <returns>The all async.</returns>
-        /// <param name="cacheKeys">Cache keys.</param>
-        /// <param name="cancellationToken">CancellationToken</param>
-        public async Task RemoveAllAsync(IEnumerable<string> cacheKeys, CancellationToken cancellationToken = default)
-        {
-            ArgumentCheck.NotNullAndCountGTZero(cacheKeys, nameof(cacheKeys));
-
-            try
-            {
-                await _distributedCache.RemoveAllAsync(cacheKeys, cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                LogMessage($"remove all async from distributed provider error [{string.Join(",", cacheKeys)}]", ex);
-            }
-
-            await _localCache.RemoveAllAsync(cacheKeys, cancellationToken);
-
-            // send message to bus in order to notify other clients.
-            await _busAsyncWrap.ExecuteAsync(async (ct) => await _bus.PublishAsync(_options.TopicName, new EasyCachingMessage { Id = _cacheId, CacheKeys = cacheKeys.ToArray() }, ct), cancellationToken);
-        }
-
-        /// <summary>
-        /// Get the specified cacheKey, dataRetriever and expiration.
-        /// </summary>
-        /// <returns>The get.</returns>
-        /// <param name="cacheKey">Cache key.</param>
-        /// <param name="dataRetriever">Data retriever.</param>
-        /// <param name="expiration">Expiration.</param>
-        /// <typeparam name="T">The 1st type parameter.</typeparam>
-        public CacheValue<T> Get<T>(string cacheKey, Func<T> dataRetriever, TimeSpan expiration)
-        {
-            ArgumentCheck.NotNullOrWhiteSpace(cacheKey, nameof(cacheKey));
-            ArgumentCheck.NotNegativeOrZero(expiration, nameof(expiration));
-
-            var result = _localCache.Get<T>(cacheKey);
-
-            if (result.HasValue)
-            {
-                return result;
-            }
-
-            try
-            {
-                result = _distributedCache.Get<T>(cacheKey, dataRetriever, expiration);
-            }
-            catch (Exception ex)
-            {
-                LogMessage($"get with data retriever from distributed provider error [{cacheKey}]", ex);
-            }
-
-            if (result.HasValue)
-            {
-                TimeSpan ts = GetExpiration(cacheKey);
-
-                _localCache.Set(cacheKey, result.Value, ts);
-
-                return result;
-            }
-
-            return CacheValue<T>.NoValue;
-        }
-
-        /// <summary>
-        /// Gets the specified cacheKey, dataRetriever and expiration async.
-        /// </summary>
-        /// <returns>The async.</returns>
-        /// <param name="cacheKey">Cache key.</param>
-        /// <param name="dataRetriever">Data retriever.</param>
-        /// <param name="expiration">Expiration.</param>
-        /// <param name="cancellationToken">CancellationToken</param>
-        /// <typeparam name="T">The 1st type parameter.</typeparam>
-        public async Task<CacheValue<T>> GetAsync<T>(string cacheKey, Func<Task<T>> dataRetriever, TimeSpan expiration, CancellationToken cancellationToken = default)
-        {
-            ArgumentCheck.NotNullOrWhiteSpace(cacheKey, nameof(cacheKey));
-            ArgumentCheck.NotNegativeOrZero(expiration, nameof(expiration));
-
-            var result = await _localCache.GetAsync<T>(cacheKey, cancellationToken);
-
-            if (result.HasValue)
-            {
-                return result;
-            }
-
-            try
-            {
-                result = await _distributedCache.GetAsync<T>(cacheKey, dataRetriever, expiration, cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                LogMessage($"get async with data retriever from distributed provider error [{cacheKey}]", ex);
-            }
-
-            if (result.HasValue)
-            {
-                TimeSpan ts = await GetExpirationAsync(cacheKey, cancellationToken);
-
-                _localCache.Set(cacheKey, result.Value, ts);
-
-                return result;
-            }
-
-            return CacheValue<T>.NoValue;
-        }
-
-        /// <summary>
-        /// Removes the by prefix.
-        /// </summary>
-        /// <param name="prefix">Prefix.</param>
-        public void RemoveByPrefix(string prefix)
-        {
-            ArgumentCheck.NotNullOrWhiteSpace(prefix, nameof(prefix));
-
-            try
-            {
-                _distributedCache.RemoveByPrefix(prefix);
-            }
-            catch (Exception ex)
-            {
-                LogMessage($"remove by prefix [{prefix}] error", ex);
-            }
-
-            _localCache.RemoveByPrefix(prefix);
-
-            // send message to bus 
-            _busSyncWrap.Execute(() => _bus.Publish(_options.TopicName, new EasyCachingMessage { Id = _cacheId, CacheKeys = new string[] { prefix }, IsPrefix = true }));
-        }
-
-        /// <summary>
-        /// Removes the by prefix async.
-        /// </summary>
-        /// <returns>The by prefix async.</returns>
-        /// <param name="prefix">Prefix.</param>
-        /// <param name="cancellationToken">CancellationToken</param>
-        public async Task RemoveByPrefixAsync(string prefix, CancellationToken cancellationToken = default)
-        {
-            ArgumentCheck.NotNullOrWhiteSpace(prefix, nameof(prefix));
-
-            try
-            {
-                await _distributedCache.RemoveByPrefixAsync(prefix, cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                LogMessage($"remove by prefix [{prefix}] error", ex);
-            }
-
-            await _localCache.RemoveByPrefixAsync(prefix);
-
-            // send message to bus in order to notify other clients.
-            await _busAsyncWrap.ExecuteAsync(async (ct) => await _bus.PublishAsync(_options.TopicName, new EasyCachingMessage { Id = _cacheId, CacheKeys = new string[] { prefix }, IsPrefix = true }, ct), cancellationToken);
-        }
-        
-        /// <summary>
-        /// Removes the by pattern async.
-        /// </summary>
-        /// <returns>The by pattern async.</returns>
-        /// <param name="pattern">Pattern.</param>
-        /// <param name="cancellationToken">CancellationToken</param>
-        public async Task RemoveByPatternAsync(string pattern, CancellationToken cancellationToken = default)
-        {
-            ArgumentCheck.NotNullOrWhiteSpace(pattern, nameof(pattern));
-
-            try
-            {
-                await _distributedCache.RemoveByPatternAsync(pattern, cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                LogMessage($"remove by pattern [{pattern}] error", ex);
-            }
-
-            await _localCache.RemoveByPatternAsync(pattern);
-
-            // send message to bus in order to notify other clients.
-            await _busAsyncWrap.ExecuteAsync(async (ct) => await _bus.PublishAsync(_options.TopicName, new EasyCachingMessage { Id = _cacheId, CacheKeys = new string[] { pattern }, IsPrefix = true }, ct), cancellationToken);
-        }
-        
-        /// <summary>
-        /// Removes the by pattern.
-        /// </summary>
-        /// <returns>The by pattern.</returns>
-        /// <param name="pattern">Pattern.</param>
-        public void RemoveByPattern(string pattern)
-        {
-            ArgumentCheck.NotNullOrWhiteSpace(pattern, nameof(pattern));
-
-            try
-            {
-                _distributedCache.RemoveByPattern(pattern);
-            }
-            catch (Exception ex)
-            {
-                LogMessage($"remove by pattern [{pattern}] error", ex);
-            }
-
-            _localCache.RemoveByPattern(pattern);
-
-            // send message to bus 
-            _busSyncWrap.Execute(() => _bus.Publish(_options.TopicName, new EasyCachingMessage { Id = _cacheId, CacheKeys = new string[] { pattern }, IsPrefix = true }));
-        }
-
-        /// <summary>
-        /// Logs the message.
-        /// </summary>
-        /// <param name="message">Message.</param>
-        /// <param name="ex">Ex.</param>
-        private void LogMessage(string message, Exception ex = null)
-        {
-            if (_options.EnableLogging)
-            {
-                if (ex == null)
+                if (e != null)
                 {
-                    _logger.LogDebug(message);
+                    s_diagnosticListener.WriteExistsCacheError(operationId, e);
                 }
                 else
                 {
-                    _logger.LogError(ex, message);
+                    s_diagnosticListener.WriteExistsCacheAfter(operationId);
                 }
             }
         }
 
-        private async Task<TimeSpan> GetExpirationAsync(string cacheKey, CancellationToken cancellationToken = default)
+        public async Task<bool> ExistsAsync(string cacheKey, CancellationToken cancellationToken = default)
         {
-            TimeSpan ts = TimeSpan.Zero;
-
+            var operationId = s_diagnosticListener.WriteExistsCacheBefore(new BeforeExistsRequestEventData(CachingProviderType.ToString(), Name, nameof(ExistsAsync), cacheKey));
+            Exception e = null;
             try
             {
-                ts = await _distributedCache.GetExpirationAsync(cacheKey, cancellationToken);
+                var flag = await BaseExistsAsync(cacheKey, cancellationToken);
+                return flag;
             }
-            catch
+            catch (Exception ex)
             {
-
+                e = ex;
+                throw;
             }
-
-            if (ts <= TimeSpan.Zero)
+            finally
             {
-                ts = TimeSpan.FromSeconds(_options.DefaultExpirationForTtlFailed);
+                if (e != null)
+                {
+                    s_diagnosticListener.WriteExistsCacheError(operationId, e);
+                }
+                else
+                {
+                    s_diagnosticListener.WriteExistsCacheAfter(operationId);
+                }
             }
-
-            return ts;
         }
 
-        private TimeSpan GetExpiration(string cacheKey)
+        public void Flush()
         {
-            TimeSpan ts = TimeSpan.Zero;
-
+            var operationId = s_diagnosticListener.WriteFlushCacheBefore(new EventData(CachingProviderType.ToString(), Name, nameof(Flush)));
+            Exception e = null;
             try
             {
-                ts = _distributedCache.GetExpiration(cacheKey);
+                BaseFlush();
             }
-            catch
+            catch (Exception ex)
             {
-
+                e = ex;
+                throw;
             }
-
-            if (ts <= TimeSpan.Zero)
+            finally
             {
-                ts = TimeSpan.FromSeconds(_options.DefaultExpirationForTtlFailed);
+                if (e != null)
+                {
+                    s_diagnosticListener.WriteFlushCacheError(operationId, e);
+                }
+                else
+                {
+                    s_diagnosticListener.WriteFlushCacheAfter(operationId);
+                }
             }
+        }
 
-            return ts;
+        public async Task FlushAsync(CancellationToken cancellationToken = default)
+        {
+            var operationId = s_diagnosticListener.WriteFlushCacheBefore(new EventData(CachingProviderType.ToString(), Name, nameof(FlushAsync)));
+            Exception e = null;
+            try
+            {
+                await BaseFlushAsync(cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                e = ex;
+                throw;
+            }
+            finally
+            {
+                if (e != null)
+                {
+                    s_diagnosticListener.WriteFlushCacheError(operationId, e);
+                }
+                else
+                {
+                    s_diagnosticListener.WriteFlushCacheAfter(operationId);
+                }
+            }
+        }
+
+        public CacheValue<T> Get<T>(string cacheKey, Func<T> dataRetriever, TimeSpan expiration)
+        {
+            var operationId = s_diagnosticListener.WriteGetCacheBefore(new BeforeGetRequestEventData(CachingProviderType.ToString(), Name, nameof(Get), new[] { cacheKey }, expiration));
+            Exception e = null;
+            try
+            {
+                if (_lockFactory == null) return BaseGet<T>(cacheKey, dataRetriever, expiration);
+
+                var value = BaseGet<T>(cacheKey);
+                if (value.HasValue) return value;
+
+                using (var @lock = _lockFactory.CreateLock(Name, $"{cacheKey}_Lock"))
+                {
+                    if (!@lock.Lock(_options.SleepMs)) throw new TimeoutException();
+
+                    value = BaseGet<T>(cacheKey);
+                    if (value.HasValue) return value;
+
+                    var item = dataRetriever();
+                    if (item != null || _options.CacheNulls)
+                    {
+                        BaseSet(cacheKey, item, expiration);
+
+                        return new CacheValue<T>(item, true);
+                    }
+                    else
+                    {
+                        return CacheValue<T>.NoValue;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                e = ex;
+                throw;
+            }
+            finally
+            {
+                if (e != null)
+                {
+                    s_diagnosticListener.WriteGetCacheError(operationId, e);
+                }
+                else
+                {
+                    s_diagnosticListener.WriteGetCacheAfter(operationId);
+                }
+            }
+        }
+
+        public CacheValue<T> Get<T>(string cacheKey)
+        {
+            var operationId = s_diagnosticListener.WriteGetCacheBefore(new BeforeGetRequestEventData(CachingProviderType.ToString(), Name, nameof(Get), new[] { cacheKey }));
+            Exception e = null;
+            try
+            {
+                return BaseGet<T>(cacheKey);
+            }
+            catch (Exception ex)
+            {
+                e = ex;
+                throw;
+            }
+            finally
+            {
+                if (e != null)
+                {
+                    s_diagnosticListener.WriteGetCacheError(operationId, e);
+                }
+                else
+                {
+                    s_diagnosticListener.WriteGetCacheAfter(operationId);
+                }
+            }
+        }
+
+        public IDictionary<string, CacheValue<T>> GetAll<T>(IEnumerable<string> cacheKeys)
+        {
+            var operationId = s_diagnosticListener.WriteGetCacheBefore(new BeforeGetRequestEventData(CachingProviderType.ToString(), Name, nameof(GetAll), cacheKeys.ToArray()));
+            Exception e = null;
+            try
+            {
+                return BaseGetAll<T>(cacheKeys);
+            }
+            catch (Exception ex)
+            {
+                e = ex;
+                throw;
+            }
+            finally
+            {
+                if (e != null)
+                {
+                    s_diagnosticListener.WriteGetCacheError(operationId, e);
+                }
+                else
+                {
+                    s_diagnosticListener.WriteGetCacheAfter(operationId);
+                }
+            }
+        }
+
+        public async Task<IDictionary<string, CacheValue<T>>> GetAllAsync<T>(IEnumerable<string> cacheKeys, CancellationToken cancellationToken = default)
+        {
+            var operationId = s_diagnosticListener.WriteGetCacheBefore(new BeforeGetRequestEventData(CachingProviderType.ToString(), Name, nameof(GetAllAsync), cacheKeys.ToArray()));
+            Exception e = null;
+            try
+            {
+                return await BaseGetAllAsync<T>(cacheKeys, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                e = ex;
+                throw;
+            }
+            finally
+            {
+                if (e != null)
+                {
+                    s_diagnosticListener.WriteGetCacheError(operationId, e);
+                }
+                else
+                {
+                    s_diagnosticListener.WriteGetCacheAfter(operationId);
+                }
+            }
+        }
+
+        public async Task<CacheValue<T>> GetAsync<T>(string cacheKey, Func<Task<T>> dataRetriever, TimeSpan expiration, CancellationToken cancellationToken = default)
+        {
+            var operationId = s_diagnosticListener.WriteGetCacheBefore(new BeforeGetRequestEventData(CachingProviderType.ToString(), Name, nameof(GetAsync), new[] { cacheKey }, expiration));
+            Exception e = null;
+            try
+            {
+                if (_lockFactory == null) return await BaseGetAsync<T>(cacheKey, dataRetriever, expiration, cancellationToken);
+
+                var value = await BaseGetAsync<T>(cacheKey);
+                if (value.HasValue) return value;
+
+                var @lock = _lockFactory.CreateLock(Name, $"{cacheKey}_Lock");
+                try
+                {
+                    if (!await @lock.LockAsync(_options.SleepMs)) throw new TimeoutException();
+
+                    value = await BaseGetAsync<T>(cacheKey, cancellationToken);
+                    if (value.HasValue) return value;
+
+                    var task = dataRetriever();
+                    if (!task.IsCompleted &&
+                        await Task.WhenAny(task, Task.Delay(_options.LockMs)) != task)
+                        throw new TimeoutException();
+
+                    var item = await task;
+                    if (item != null || _options.CacheNulls)
+                    {
+                        await BaseSetAsync(cacheKey, item, expiration, cancellationToken);
+
+                        return new CacheValue<T>(item, true);
+                    }
+                    else
+                    {
+                        return CacheValue<T>.NoValue;
+                    }
+                }
+                finally
+                {
+                    await @lock.DisposeAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                e = ex;
+                throw;
+            }
+            finally
+            {
+                if (e != null)
+                {
+                    s_diagnosticListener.WriteGetCacheError(operationId, e);
+                }
+                else
+                {
+                    s_diagnosticListener.WriteGetCacheAfter(operationId);
+                }
+            }
         }
 
         public async Task<object> GetAsync(string cacheKey, Type type, CancellationToken cancellationToken = default)
         {
-            ArgumentCheck.NotNullOrWhiteSpace(cacheKey, nameof(cacheKey));
-
-            var cacheValue = await _localCache.GetAsync(cacheKey, type, cancellationToken);
-
-            if (cacheValue != null)
-            {
-                return cacheValue;
-            }
-
-            LogMessage($"local cache can not get the value of {cacheKey}");
-
+            var operationId = s_diagnosticListener.WriteGetCacheBefore(new BeforeGetRequestEventData(CachingProviderType.ToString(), Name, "GetAsync_Type", new[] { cacheKey }));
+            Exception e = null;
             try
             {
-                cacheValue = await _distributedCache.GetAsync(cacheKey, type, cancellationToken);
+                return await BaseGetAsync(cacheKey, type, cancellationToken);
             }
             catch (Exception ex)
             {
-                LogMessage($"distributed cache get error, [{cacheKey}]", ex);
+                e = ex;
+                throw;
             }
-
-            if (cacheValue != null)
+            finally
             {
-                TimeSpan ts = await GetExpirationAsync(cacheKey, cancellationToken);
-              
-                await _localCache.SetAsync(cacheKey, cacheValue, ts, cancellationToken);
-
-                return cacheValue;
+                if (e != null)
+                {
+                    s_diagnosticListener.WriteGetCacheError(operationId, e);
+                }
+                else
+                {
+                    s_diagnosticListener.WriteGetCacheAfter(operationId);
+                }
             }
+        }
 
-            LogMessage($"distributed cache can not get the value of {cacheKey}");
+        public async Task<CacheValue<T>> GetAsync<T>(string cacheKey, CancellationToken cancellationToken = default)
+        {
+            var operationId = s_diagnosticListener.WriteGetCacheBefore(new BeforeGetRequestEventData(CachingProviderType.ToString(), Name, nameof(GetAsync), new[] { cacheKey }));
+            Exception e = null;
+            try
+            {
+                return await BaseGetAsync<T>(cacheKey, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                e = ex;
+                throw;
+            }
+            finally
+            {
+                if (e != null)
+                {
+                    s_diagnosticListener.WriteGetCacheError(operationId, e);
+                }
+                else
+                {
+                    s_diagnosticListener.WriteGetCacheAfter(operationId);
+                }
+            }
+        }
 
-            return null;
+        public IDictionary<string, CacheValue<T>> GetByPrefix<T>(string prefix)
+        {
+            var operationId = s_diagnosticListener.WriteGetCacheBefore(new BeforeGetRequestEventData(CachingProviderType.ToString(), Name, nameof(GetByPrefix), new[] { prefix }));
+            Exception e = null;
+            try
+            {
+                return BaseGetByPrefix<T>(prefix);
+            }
+            catch (Exception ex)
+            {
+                e = ex;
+                throw;
+            }
+            finally
+            {
+                if (e != null)
+                {
+                    s_diagnosticListener.WriteGetCacheError(operationId, e);
+                }
+                else
+                {
+                    s_diagnosticListener.WriteGetCacheAfter(operationId);
+                }
+            }
+        }
+
+        public async Task<IDictionary<string, CacheValue<T>>> GetByPrefixAsync<T>(string prefix, CancellationToken cancellationToken = default)
+        {
+            var operationId = s_diagnosticListener.WriteGetCacheBefore(new BeforeGetRequestEventData(CachingProviderType.ToString(), Name, nameof(GetByPrefixAsync), new[] { prefix }));
+            Exception e = null;
+            try
+            {
+                return await BaseGetByPrefixAsync<T>(prefix, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                e = ex;
+                throw;
+            }
+            finally
+            {
+                if (e != null)
+                {
+                    s_diagnosticListener.WriteGetCacheError(operationId, e);
+                }
+                else
+                {
+                    s_diagnosticListener.WriteGetCacheAfter(operationId);
+                }
+            }
+        }
+
+        public int GetCount(string prefix = "")
+        {
+            return BaseGetCount(prefix);
+        }
+
+        public async Task<int> GetCountAsync(string prefix = "", CancellationToken cancellationToken = default)
+        {
+            return await BaseGetCountAsync(prefix, cancellationToken);
+        }
+
+        public void Remove(string cacheKey)
+        {
+            var operationId = s_diagnosticListener.WriteRemoveCacheBefore(new BeforeRemoveRequestEventData(CachingProviderType.ToString(), Name, nameof(Remove), new[] { cacheKey }));
+            Exception e = null;
+            try
+            {
+                BaseRemove(cacheKey);
+            }
+            catch (Exception ex)
+            {
+                e = ex;
+                throw;
+            }
+            finally
+            {
+                if (e != null)
+                {
+                    s_diagnosticListener.WriteRemoveCacheError(operationId, e);
+                }
+                else
+                {
+                    s_diagnosticListener.WriteRemoveCacheAfter(operationId);
+                }
+            }
+        }
+
+        public void RemoveAll(IEnumerable<string> cacheKeys)
+        {
+            var operationId = s_diagnosticListener.WriteRemoveCacheBefore(new BeforeRemoveRequestEventData(CachingProviderType.ToString(), Name, nameof(RemoveAll), cacheKeys.ToArray()));
+            Exception e = null;
+            try
+            {
+                BaseRemoveAll(cacheKeys);
+            }
+            catch (Exception ex)
+            {
+                e = ex;
+                throw;
+            }
+            finally
+            {
+                if (e != null)
+                {
+                    s_diagnosticListener.WriteRemoveCacheError(operationId, e);
+                }
+                else
+                {
+                    s_diagnosticListener.WriteRemoveCacheAfter(operationId);
+                }
+            }
+        }
+
+        public async Task RemoveAllAsync(IEnumerable<string> cacheKeys, CancellationToken cancellationToken = default)
+        {
+            var operationId = s_diagnosticListener.WriteRemoveCacheBefore(new BeforeRemoveRequestEventData(CachingProviderType.ToString(), Name, nameof(RemoveAllAsync), cacheKeys.ToArray()));
+            Exception e = null;
+            try
+            {
+                await BaseRemoveAllAsync(cacheKeys, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                e = ex;
+                throw;
+            }
+            finally
+            {
+                if (e != null)
+                {
+                    s_diagnosticListener.WriteRemoveCacheError(operationId, e);
+                }
+                else
+                {
+                    s_diagnosticListener.WriteRemoveCacheAfter(operationId);
+                }
+            }
+        }
+
+        public async Task RemoveAsync(string cacheKey, CancellationToken cancellationToken = default)
+        {
+            var operationId = s_diagnosticListener.WriteRemoveCacheBefore(new BeforeRemoveRequestEventData(CachingProviderType.ToString(), Name, nameof(RemoveAsync), new[] { cacheKey }));
+            Exception e = null;
+            try
+            {
+                await BaseRemoveAsync(cacheKey, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                e = ex;
+                throw;
+            }
+            finally
+            {
+                if (e != null)
+                {
+                    s_diagnosticListener.WriteRemoveCacheError(operationId, e);
+                }
+                else
+                {
+                    s_diagnosticListener.WriteRemoveCacheAfter(operationId);
+                }
+            }
+        }
+
+        public void RemoveByPrefix(string prefix)
+        {
+            var operationId = s_diagnosticListener.WriteRemoveCacheBefore(new BeforeRemoveRequestEventData(CachingProviderType.ToString(), Name, nameof(RemoveByPrefix), new[] { prefix }));
+            Exception e = null;
+            try
+            {
+                BaseRemoveByPrefix(prefix);
+            }
+            catch (Exception ex)
+            {
+                e = ex;
+                throw;
+            }
+            finally
+            {
+                if (e != null)
+                {
+                    s_diagnosticListener.WriteRemoveCacheError(operationId, e);
+                }
+                else
+                {
+                    s_diagnosticListener.WriteRemoveCacheAfter(operationId);
+                }
+            }
+        }
+
+        public async Task RemoveByPrefixAsync(string prefix, CancellationToken cancellationToken = default)
+        {
+            var operationId = s_diagnosticListener.WriteRemoveCacheBefore(new BeforeRemoveRequestEventData(CachingProviderType.ToString(), Name, nameof(RemoveByPrefixAsync), new[] { prefix }));
+            Exception e = null;
+            try
+            {
+                await BaseRemoveByPrefixAsync(prefix, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                e = ex;
+                throw;
+            }
+            finally
+            {
+                if (e != null)
+                {
+                    s_diagnosticListener.WriteRemoveCacheError(operationId, e);
+                }
+                else
+                {
+                    s_diagnosticListener.WriteRemoveCacheAfter(operationId);
+                }
+            }
+        }
+
+        public void Set<T>(string cacheKey, T cacheValue, TimeSpan expiration)
+        {
+            var operationId = s_diagnosticListener.WriteSetCacheBefore(new BeforeSetRequestEventData(CachingProviderType.ToString(), Name, nameof(Set), new Dictionary<string, object> { { cacheKey, cacheValue } }, expiration));
+            Exception e = null;
+            try
+            {
+                BaseSet(cacheKey, cacheValue, expiration);
+            }
+            catch (Exception ex)
+            {
+                e = ex;
+                throw;
+            }
+            finally
+            {
+                if (e != null)
+                {
+                    s_diagnosticListener.WriteSetCacheError(operationId, e);
+                }
+                else
+                {
+                    s_diagnosticListener.WriteSetCacheAfter(operationId);
+                }
+            }
+        }
+
+        public void SetAll<T>(IDictionary<string, T> value, TimeSpan expiration)
+        {
+            var operationId = s_diagnosticListener.WriteSetCacheBefore(new BeforeSetRequestEventData(CachingProviderType.ToString(), Name, nameof(SetAll), value.ToDictionary(k => k.Key, v => (object)v.Value), expiration));
+            Exception e = null;
+            try
+            {
+                BaseSetAll(value, expiration);
+            }
+            catch (Exception ex)
+            {
+                e = ex;
+                throw;
+            }
+            finally
+            {
+                if (e != null)
+                {
+                    s_diagnosticListener.WriteSetCacheError(operationId, e);
+                }
+                else
+                {
+                    s_diagnosticListener.WriteSetCacheAfter(operationId);
+                }
+            }
+        }
+
+        public async Task SetAllAsync<T>(IDictionary<string, T> value, TimeSpan expiration, CancellationToken cancellationToken = default)
+        {
+            var operationId = s_diagnosticListener.WriteSetCacheBefore(new BeforeSetRequestEventData(CachingProviderType.ToString(), Name, nameof(SetAllAsync), value.ToDictionary(k => k.Key, v => (object)v.Value), expiration));
+            Exception e = null;
+            try
+            {
+                await BaseSetAllAsync(value, expiration, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                e = ex;
+                throw;
+            }
+            finally
+            {
+                if (e != null)
+                {
+                    s_diagnosticListener.WriteSetCacheError(operationId, e);
+                }
+                else
+                {
+                    s_diagnosticListener.WriteSetCacheAfter(operationId);
+                }
+            }
+        }
+
+        public async Task SetAsync<T>(string cacheKey, T cacheValue, TimeSpan expiration, CancellationToken cancellationToken = default)
+        {
+            var operationId = s_diagnosticListener.WriteSetCacheBefore(new BeforeSetRequestEventData(CachingProviderType.ToString(), Name, nameof(SetAsync), new Dictionary<string, object> { { cacheKey, cacheValue } }, expiration));
+            Exception e = null;
+            try
+            {
+                await BaseSetAsync(cacheKey, cacheValue, expiration, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                e = ex;
+                throw;
+            }
+            finally
+            {
+                if (e != null)
+                {
+                    s_diagnosticListener.WriteSetCacheError(operationId, e);
+                }
+                else
+                {
+                    s_diagnosticListener.WriteSetCacheAfter(operationId);
+                }
+            }
+        }
+
+        public bool TrySet<T>(string cacheKey, T cacheValue, TimeSpan expiration)
+        {
+            var operationId = s_diagnosticListener.WriteSetCacheBefore(new BeforeSetRequestEventData(CachingProviderType.ToString(), Name, nameof(TrySet), new Dictionary<string, object> { { cacheKey, cacheValue } }, expiration));
+            Exception e = null;
+            try
+            {
+                return BaseTrySet(cacheKey, cacheValue, expiration);
+            }
+            catch (Exception ex)
+            {
+                e = ex;
+                throw;
+            }
+            finally
+            {
+                if (e != null)
+                {
+                    s_diagnosticListener.WriteSetCacheError(operationId, e);
+                }
+                else
+                {
+                    s_diagnosticListener.WriteSetCacheAfter(operationId);
+                }
+            }
+        }
+
+        public async Task<bool> TrySetAsync<T>(string cacheKey, T cacheValue, TimeSpan expiration, CancellationToken cancellationToken = default)
+        {
+            var operationId = s_diagnosticListener.WriteSetCacheBefore(new BeforeSetRequestEventData(CachingProviderType.ToString(), Name, nameof(TrySetAsync), new Dictionary<string, object> { { cacheKey, cacheValue } }, expiration));
+            Exception e = null;
+            try
+            {
+                return await BaseTrySetAsync(cacheKey, cacheValue, expiration, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                e = ex;
+                throw;
+            }
+            finally
+            {
+                if (e != null)
+                {
+                    s_diagnosticListener.WriteSetCacheError(operationId, e);
+                }
+                else
+                {
+                    s_diagnosticListener.WriteSetCacheAfter(operationId);
+                }
+            }
+        }
+
+        public TimeSpan GetExpiration(string cacheKey)
+        {
+            return BaseGetExpiration(cacheKey);
+        }
+
+        public async Task<TimeSpan> GetExpirationAsync(string cacheKey, CancellationToken cancellationToken = default)
+        {
+            return await BaseGetExpirationAsync(cacheKey, cancellationToken);
+        }
+
+        public ProviderInfo GetProviderInfo()
+        {
+            return BaseGetProviderInfo();
         }
     }
 }
