@@ -302,10 +302,12 @@
         public override async Task BaseRemoveByPatternAsync(string pattern, CancellationToken cancellationToken = default)
         {
             ArgumentCheck.NotNullOrWhiteSpace(pattern, nameof(pattern));
+            
+            pattern = this.HandleKeyPattern(pattern);
 
             if (_options.EnableLogging)
-                _logger?.LogInformation($"BaseRemoveByPatternAsync : pattern = {pattern}");
-
+                _logger?.LogInformation($"RemoveByPatternAsync : pattern = {pattern}");
+            
             var redisKeys = this.SearchRedisKeys(pattern);
 
             var tasks = new List<Task<long>>();

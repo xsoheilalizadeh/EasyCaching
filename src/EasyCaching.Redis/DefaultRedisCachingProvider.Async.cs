@@ -233,8 +233,10 @@
         {
             ArgumentCheck.NotNullOrWhiteSpace(pattern, nameof(pattern));
 
+            pattern = this.HandleKeyPattern(pattern);
+
             if (_options.EnableLogging)
-                _logger?.LogInformation($"BaseRemoveByPatternAsync : pattern = {pattern}");
+                _logger?.LogInformation($"RemoveByPatternAsync : pattern = {pattern}");
 
             var redisKeys = this.SearchRedisKeys(pattern);
 

@@ -424,7 +424,7 @@
             pattern = this.HandleKeyPattern(pattern);
 
             if (_options.EnableLogging)
-                _logger?.LogInformation($"BaseRemoveByPattern : pattern = {pattern}");
+                _logger?.LogInformation($"RemoveByPattern : pattern = {pattern}");
 
             var redisKeys = this.SearchRedisKeys(pattern);
 
