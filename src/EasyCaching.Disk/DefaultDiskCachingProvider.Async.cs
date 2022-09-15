@@ -370,7 +370,7 @@
             var searchPattern = this.ProcessSearchKeyPattern(pattern);
             var searchKey = this.HandleSearchKeyPattern(pattern);
             
-            var list = _cacheKeysMap.Where(pair => Predicate(pair.Key,searchKey, searchPattern)).Select(x => x.Key).ToList();
+            var list = _cacheKeysMap.Where(pair => FilterByPattern(pair.Key,searchKey, searchPattern)).Select(x => x.Key).ToList();
 
             foreach (var item in list)
             {
@@ -385,23 +385,6 @@
             return Task.CompletedTask;
         }
         
-        private bool Predicate(string key, string searchKey, SearchKeyPattern searchKeyPattern)
-        {
-            switch (searchKeyPattern)
-            {
-                case SearchKeyPattern.Postfix:
-                    return key.EndsWith(searchKey, StringComparison.Ordinal);
-                case SearchKeyPattern.Prefix:
-                    return key.StartsWith(searchKey, StringComparison.Ordinal);
-                case SearchKeyPattern.Contains:
-                    return key.Contains(searchKey);
-                case SearchKeyPattern.Exact:
-                    return key.Equals(searchKey, StringComparison.Ordinal);
-                default:
-                    throw new ArgumentOutOfRangeException(nameof(searchKeyPattern), searchKeyPattern, null);
-            }
-        }
-
         public override async Task BaseSetAllAsync<T>(IDictionary<string, T> values, TimeSpan expiration, CancellationToken cancellationToken = default)
         {
             ArgumentCheck.NotNegativeOrZero(expiration, nameof(expiration));

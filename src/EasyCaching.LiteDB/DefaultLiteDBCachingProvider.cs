@@ -252,10 +252,10 @@ namespace EasyCaching.LiteDB
             var searchPattern = this.ProcessSearchKeyPattern(pattern);
             var searchKey = this.HandleSearchKeyPattern(pattern);
 
-            _cache.DeleteMany(Predicate(searchKey, searchPattern));
+            _cache.DeleteMany(FilterByPattern(searchKey, searchPattern));
         }
 
-        private static Expression<Func<CacheItem, bool>> Predicate(string searchKey, SearchKeyPattern searchKeyPattern)
+        private static Expression<Func<CacheItem, bool>> FilterByPattern(string searchKey, SearchKeyPattern searchKeyPattern)
         {
             switch (searchKeyPattern)
             {

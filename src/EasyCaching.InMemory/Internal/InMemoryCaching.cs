@@ -269,12 +269,12 @@
 
         public int RemoveByPattern(string searchKeyPattern, string searchKey, SearchKeyPattern searchPattern)
         {
-            var keysToRemove = _memory.Keys.Where(x => Predicate(x, searchKey, searchPattern)).ToList();
+            var keysToRemove = _memory.Keys.Where(x => FilterByPattern(x, searchKey, searchPattern)).ToList();
             
             return RemoveAll(keysToRemove);
         }
         
-        private bool Predicate(string key, string searchKey, SearchKeyPattern searchKeyPattern)
+        private static bool FilterByPattern(string key, string searchKey, SearchKeyPattern searchKeyPattern)
         {
             switch (searchKeyPattern)
             {

@@ -269,7 +269,7 @@
             var count = _cache.RemoveByPattern(pattern, searchKey, searchPattern);
 
             if (_options.EnableLogging)
-                _logger?.LogInformation($"BaseRemoveByPattern : pattern = {pattern} , count = {count}");
+                _logger?.LogInformation($"RemoveByPattern : pattern = {pattern} , count = {count}");
         }
 
         /// <summary>
