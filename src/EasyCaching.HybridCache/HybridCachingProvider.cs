@@ -712,7 +712,12 @@
             await _busAsyncWrap.ExecuteAsync(async (ct) => await _bus.PublishAsync(_options.TopicName, new EasyCachingMessage { Id = _cacheId, CacheKeys = new string[] { prefix }, IsPrefix = true }, ct), cancellationToken);
         }
         
-        
+        /// <summary>
+        /// Removes the by pattern async.
+        /// </summary>
+        /// <returns>The by pattern async.</returns>
+        /// <param name="pattern">Pattern.</param>
+        /// <param name="cancellationToken">CancellationToken</param>
         public async Task RemoveByPatternAsync(string pattern, CancellationToken cancellationToken = default)
         {
             ArgumentCheck.NotNullOrWhiteSpace(pattern, nameof(pattern));
@@ -731,7 +736,12 @@
             // send message to bus in order to notify other clients.
             await _busAsyncWrap.ExecuteAsync(async (ct) => await _bus.PublishAsync(_options.TopicName, new EasyCachingMessage { Id = _cacheId, CacheKeys = new string[] { pattern }, IsPrefix = true }, ct), cancellationToken);
         }
-
+        
+        /// <summary>
+        /// Removes the by pattern.
+        /// </summary>
+        /// <returns>The by pattern.</returns>
+        /// <param name="pattern">Pattern.</param>
         public void RemoveByPattern(string pattern)
         {
             ArgumentCheck.NotNullOrWhiteSpace(pattern, nameof(pattern));

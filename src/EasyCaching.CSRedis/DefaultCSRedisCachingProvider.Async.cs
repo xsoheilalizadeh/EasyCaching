@@ -299,6 +299,12 @@
             await Task.WhenAll(tasks);
         }
 
+        /// <summary>
+        /// Removes the by pattern async.
+        /// </summary>
+        /// <returns>The by pattern async.</returns>
+        /// <param name="pattern">Pattern.</param>
+        /// <param name="cancellationToken">CancellationToken</param>
         public override async Task BaseRemoveByPatternAsync(string pattern, CancellationToken cancellationToken = default)
         {
             ArgumentCheck.NotNullOrWhiteSpace(pattern, nameof(pattern));
