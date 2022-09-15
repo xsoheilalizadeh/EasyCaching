@@ -56,8 +56,6 @@ namespace EasyCaching.Core
         public abstract Task<CacheValue<T>> BaseGetAsync<T>(string cacheKey, CancellationToken cancellationToken = default);
         public abstract IDictionary<string, CacheValue<T>> BaseGetByPrefix<T>(string prefix);
         public abstract Task<IDictionary<string, CacheValue<T>>> BaseGetByPrefixAsync<T>(string prefix, CancellationToken cancellationToken = default);
-        public abstract void BaseRemoveByPattern(string pattern);
-        public abstract Task BaseRemoveByPatternAsync(string pattern, CancellationToken cancellationToken = default);
         public abstract int BaseGetCount(string prefix = "");
         public abstract Task<int> BaseGetCountAsync(string prefix = "", CancellationToken cancellationToken = default);
         public abstract void BaseRemove(string cacheKey);
@@ -66,6 +64,8 @@ namespace EasyCaching.Core
         public abstract Task BaseRemoveAsync(string cacheKey, CancellationToken cancellationToken = default);
         public abstract void BaseRemoveByPrefix(string prefix);
         public abstract Task BaseRemoveByPrefixAsync(string prefix, CancellationToken cancellationToken = default);
+        public abstract void BaseRemoveByPattern(string pattern);
+        public abstract Task BaseRemoveByPatternAsync(string pattern, CancellationToken cancellationToken = default);
         public abstract void BaseSet<T>(string cacheKey, T cacheValue, TimeSpan expiration);
         public abstract void BaseSetAll<T>(IDictionary<string, T> values, TimeSpan expiration);
         public abstract Task BaseSetAllAsync<T>(IDictionary<string, T> values, TimeSpan expiration, CancellationToken cancellationToken = default);
@@ -637,7 +637,7 @@ namespace EasyCaching.Core
                 }
             }
         }
-        
+
         public void RemoveByPattern(string pattern)
         {
             var operationId = s_diagnosticListener.WriteRemoveCacheBefore(
@@ -864,7 +864,7 @@ namespace EasyCaching.Core
         {
             return BaseGetProviderInfo();
         }
-        
+
         protected SearchKeyPattern ProcessSearchKeyPattern(string pattern)
         {
             var postfix = pattern.StartsWith("*");
