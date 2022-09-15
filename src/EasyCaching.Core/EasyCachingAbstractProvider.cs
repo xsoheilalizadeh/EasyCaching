@@ -893,6 +893,6 @@ namespace EasyCaching.Core
         protected string HandleSearchKeyPattern(string pattern)
         {
             return pattern.Replace("*", string.Empty);
-        }
+        } 
     }
 }
