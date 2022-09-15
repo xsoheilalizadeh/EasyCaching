@@ -671,7 +671,8 @@
         public void RemoveByPrefix(string prefix)
         {
             ArgumentCheck.NotNullOrWhiteSpace(prefix, nameof(prefix));
-
+ 
+            
             try
             {
                 _distributedCache.RemoveByPrefix(prefix);
