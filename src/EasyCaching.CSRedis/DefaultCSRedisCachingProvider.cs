@@ -417,6 +417,10 @@
             }
         }
 
+        /// <summary>
+        /// Remove cached value by pattern
+        /// </summary>
+        /// <param name="pattern">The pattern of cache key</param>
         public override void BaseRemoveByPattern(string pattern)
         {
             ArgumentCheck.NotNullOrWhiteSpace(pattern, nameof(pattern));
@@ -433,8 +437,6 @@
                 _cache.Del(item);
             }
         }
-        
-     
 
         /// <summary>
         /// Set the specified cacheKey, cacheValue and expiration.
